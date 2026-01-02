@@ -3,9 +3,88 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>高雄親子遊+記帳神器</title>
+    <title>高雄親子遊 - 雲端同步記帳版</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, deleteDoc, doc, onSnapshot, query } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Initialize Firebase
+        const firebaseConfig = JSON.parse(__firebase_config);
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+
+        // Global variables for UI access
+        window.db = db;
+        window.collection = collection;
+        window.addDoc = addDoc;
+        window.deleteDoc = deleteDoc;
+        window.doc = doc;
+        window.appId = appId;
+        window.currentAuthUser = null;
+
+        // Status Indicator Logic
+        const statusDot = document.getElementById('status-dot');
+        const statusText = document.getElementById('status-text');
+
+        function updateStatus(isOnline) {
+            if (statusDot && statusText) {
+                if (isOnline) {
+                    statusDot.classList.remove('bg-red-500');
+                    statusDot.classList.add('bg-green-500', 'animate-pulse');
+                    statusText.innerText = '雲端同步中';
+                } else {
+                    statusDot.classList.remove('bg-green-500', 'animate-pulse');
+                    statusDot.classList.add('bg-red-500');
+                    statusText.innerText = '連線中...';
+                }
+            }
+        }
+
+        // Auth & Realtime Listener
+        signInAnonymously(auth).then(() => {
+            console.log("Signed in anonymously");
+        }).catch((error) => {
+            console.error("Auth Error", error);
+        });
+
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                window.currentAuthUser = user;
+                updateStatus(true);
+                
+                // Setup Firestore Listener
+                // PATH: /artifacts/{appId}/public/data/expenses
+                const q = query(collection(db, 'artifacts', appId, 'public', 'data', 'expenses'));
+                
+                onSnapshot(q, (snapshot) => {
+                    const expenses = [];
+                    snapshot.forEach((doc) => {
+                        expenses.push({ id: doc.id, ...doc.data() });
+                    });
+                    
+                    // Sort locally by timestamp desc (newest first)
+                    expenses.sort((a, b) => b.timestamp - a.timestamp);
+                    
+                    // Render UI
+                    window.renderExpenses(expenses);
+                }, (error) => {
+                    console.error("Snapshot error:", error);
+                    updateStatus(false);
+                });
+
+            } else {
+                updateStatus(false);
+            }
+        });
+    </script>
+
     <script>
         tailwind.config = {
             theme: {
@@ -56,7 +135,6 @@
         .option-card:active {
             transform: scale(0.98);
         }
-        /* Tab Transitions */
         .tab-content {
             display: none;
             animation: fadeIn 0.3s ease-in-out;
@@ -75,7 +153,6 @@
         .nav-item.active i {
             transform: translateY(-2px);
         }
-        /* Accounting Specific */
         .balance-card {
             background: linear-gradient(135deg, #0f4c81 0%, #1e3a8a 100%);
         }
@@ -88,7 +165,10 @@
         <div class="max-w-3xl mx-auto flex justify-between items-center">
             <div>
                 <h1 class="text-xl font-bold"><i class="fas fa-users mr-2"></i>高雄親子暖冬行</h1>
-                <p class="text-xs opacity-90 mt-1">1/02 - 1/04 | 記帳功能版</p>
+                <div class="flex items-center mt-1">
+                    <div id="status-dot" class="w-2 h-2 rounded-full bg-red-500 mr-2 transition-colors duration-300"></div>
+                    <p id="status-text" class="text-xs opacity-90">連線中...</p>
+                </div>
             </div>
             <a href="https://www.google.com/maps/search/?api=1&query=H2O水京棧國際酒店" target="_blank" class="bg-white/20 hover:bg-white/30 px-3 py-2 rounded text-sm transition flex items-center">
                 <i class="fas fa-hotel mr-1"></i> 回飯店
@@ -101,102 +181,55 @@
 
         <!-- TAB 1: ITINERARY -->
         <div id="tab-itinerary" class="tab-content active">
-            
             <!-- Day 1 -->
             <div class="mb-8">
                 <div class="flex items-center mb-4 sticky top-20 z-30 bg-white/90 backdrop-blur py-2 shadow-sm rounded-lg px-2">
                     <div class="bg-primary text-white font-bold px-3 py-1 rounded-full text-sm mr-3">Day 1</div>
                     <h3 class="text-lg font-bold text-gray-800">1/02 (五) 動物園探險</h3>
                 </div>
-
                 <div class="relative pl-6">
                     <div class="timeline-line"></div>
-
-                    <!-- HSR Arrival -->
+                    <!-- Items -->
                     <div class="timeline-item mb-6 pl-6 relative">
                         <div class="absolute left-0 top-1.5 w-4 h-4 bg-primary rounded-full border-2 border-white"></div>
                         <div class="bg-white p-3 rounded-xl shadow-sm">
                             <div class="flex justify-between">
-                                <div>
-                                    <span class="text-primary font-bold text-sm">11:05</span>
-                                    <h4 class="font-bold text-gray-800">抵達左營高鐵</h4>
-                                    <p class="text-xs text-gray-500">117次列車</p>
-                                </div>
-                                <i class="fas fa-train text-gray-300 text-xl"></i>
+                                <div><span class="text-primary font-bold text-sm">11:05</span><h4 class="font-bold text-gray-800">抵達左營高鐵</h4><p class="text-xs text-gray-500">117次列車</p></div><i class="fas fa-train text-gray-300 text-xl"></i>
                             </div>
                         </div>
                     </div>
-
-                    <!-- Shuttle Info -->
                     <div class="timeline-item mb-6 pl-6 relative">
                         <div class="absolute left-0 top-1.5 w-4 h-4 bg-accent rounded-full border-2 border-white shadow animate-pulse"></div>
                         <div class="bg-red-50 p-4 rounded-xl shadow-md border-l-4 border-accent">
                             <div class="flex justify-between items-start">
-                                <div>
-                                    <span class="text-accent font-bold text-sm">11:30 接駁車發車</span>
-                                    <h4 class="font-bold text-gray-800 mt-1">集合點：高鐵大廳 星巴克</h4>
-                                    <p class="text-xs text-gray-600 mt-1">請留意 H2O 接駁車標誌</p>
-                                </div>
-                                <i class="fas fa-bus text-accent text-2xl"></i>
+                                <div><span class="text-accent font-bold text-sm">11:30 接駁車發車</span><h4 class="font-bold text-gray-800 mt-1">集合點：高鐵大廳 星巴克</h4></div><i class="fas fa-bus text-accent text-2xl"></i>
                             </div>
                         </div>
                     </div>
-
-                    <!-- Lunch Options -->
                     <div class="timeline-item mb-8 pl-6 relative">
                         <div class="absolute left-0 top-1.5 w-4 h-4 bg-secondary rounded-full border-2 border-white shadow"></div>
-                        <h4 class="font-bold text-gray-800 mb-2 flex items-center text-sm">
-                            <i class="fas fa-utensils text-secondary mr-2"></i> 午餐選擇 (飯店周邊)
-                        </h4>
+                        <h4 class="font-bold text-gray-800 mb-2 flex items-center text-sm"><i class="fas fa-utensils text-secondary mr-2"></i> 午餐選擇</h4>
                         <div class="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-                            <a href="https://www.google.com/maps/search/?api=1&query=H2O水京棧+Ripple" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-blue-500 block">
-                                <h5 class="font-bold text-sm text-gray-800">Ripple 西餐廳</h5>
-                                <p class="text-xs text-gray-500 mt-1">飯店20樓，最方便。</p>
-                            </a>
-                            <a href="https://www.google.com/maps/search/?api=1&query=赤鬼炙燒牛排+高雄博愛店" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-red-500 block">
-                                <h5 class="font-bold text-sm text-gray-800">赤鬼牛排 (博愛店)</h5>
-                                <p class="text-xs text-gray-500 mt-1">走路可達，造型有趣。</p>
-                            </a>
-                            <a href="https://www.google.com/maps/search/?api=1&query=漢神巨蛋購物廣場" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-yellow-500 block">
-                                <h5 class="font-bold text-sm text-gray-800">漢神巨蛋美食</h5>
-                                <p class="text-xs text-gray-500 mt-1">鼎泰豐/瓦城。車程3分鐘。</p>
-                            </a>
+                            <a href="https://www.google.com/maps/search/?api=1&query=H2O水京棧+Ripple" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-blue-500 block"><h5 class="font-bold text-sm text-gray-800">Ripple 西餐廳</h5><p class="text-xs text-gray-500 mt-1">飯店20樓，最方便。</p></a>
+                            <a href="https://www.google.com/maps/search/?api=1&query=赤鬼炙燒牛排+高雄博愛店" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-red-500 block"><h5 class="font-bold text-sm text-gray-800">赤鬼牛排</h5><p class="text-xs text-gray-500 mt-1">走路可達，造型有趣。</p></a>
+                            <a href="https://www.google.com/maps/search/?api=1&query=漢神巨蛋購物廣場" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-yellow-500 block"><h5 class="font-bold text-sm text-gray-800">漢神巨蛋</h5><p class="text-xs text-gray-500 mt-1">鼎泰豐/瓦城。</p></a>
                         </div>
                     </div>
-
-                    <!-- Zoo Activity -->
                     <div class="timeline-item mb-6 pl-6 relative">
                         <div class="absolute left-0 top-1.5 w-4 h-4 bg-primary rounded-full border-2 border-white shadow"></div>
                         <div class="bg-white p-4 rounded-xl shadow-md">
                             <div class="flex justify-between items-start mb-2">
-                                <div>
-                                    <span class="text-primary font-bold text-sm">13:30 - 17:00</span>
-                                    <h4 class="font-bold text-lg text-gray-800">壽山動物園</h4>
-                                    <p class="text-xs text-gray-500">建議搭乘計程車前往</p>
-                                </div>
-                                <i class="fas fa-hippo text-gray-300 text-2xl"></i>
+                                <div><span class="text-primary font-bold text-sm">13:30 - 17:00</span><h4 class="font-bold text-lg text-gray-800">壽山動物園</h4></div><i class="fas fa-hippo text-gray-300 text-2xl"></i>
                             </div>
-                            <a href="https://www.google.com/maps/search/?api=1&query=壽山動物園" target="_blank" class="block w-full bg-primary/10 hover:bg-primary/20 text-primary text-center py-2 rounded-lg font-bold text-sm transition">
-                                <i class="fas fa-location-arrow mr-1"></i> 導航至動物園
-                            </a>
+                            <a href="https://www.google.com/maps/search/?api=1&query=壽山動物園" target="_blank" class="block w-full bg-primary/10 hover:bg-primary/20 text-primary text-center py-2 rounded-lg font-bold text-sm transition">導航至動物園</a>
                         </div>
                     </div>
-
-                    <!-- Dinner Options -->
                     <div class="timeline-item mb-8 pl-6 relative">
-                        <div class="absolute left-0 top-1.5 w-4 h-4 bg-secondary rounded-full border-2 border-white shadow"></div>
-                        <h4 class="font-bold text-gray-800 mb-2 flex items-center text-sm">
-                            <i class="fas fa-moon text-secondary mr-2"></i> 晚餐選擇
-                        </h4>
+                         <div class="absolute left-0 top-1.5 w-4 h-4 bg-secondary rounded-full border-2 border-white shadow"></div>
+                        <h4 class="font-bold text-gray-800 mb-2 flex items-center text-sm"><i class="fas fa-moon text-secondary mr-2"></i> 晚餐選擇</h4>
                         <div class="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-                            <a href="https://www.google.com/maps/search/?api=1&query=老新台菜九如創始店" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-purple-500 block">
-                                <h5 class="font-bold text-sm text-gray-800">老新台菜</h5>
-                                <p class="text-xs text-gray-500">復古台菜</p>
-                            </a>
-                            <a href="https://www.google.com/maps/search/?api=1&query=瑞豐夜市" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-green-500 block">
-                                <h5 class="font-bold text-sm text-gray-800">瑞豐夜市</h5>
-                                <p class="text-xs text-gray-500">外帶回飯店吃</p>
-                            </a>
+                            <a href="https://www.google.com/maps/search/?api=1&query=老新台菜九如創始店" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-purple-500 block"><h5 class="font-bold text-sm text-gray-800">老新台菜</h5><p class="text-xs text-gray-500">復古台菜</p></a>
+                            <a href="https://www.google.com/maps/search/?api=1&query=瑞豐夜市" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-green-500 block"><h5 class="font-bold text-sm text-gray-800">瑞豐夜市</h5><p class="text-xs text-gray-500">外帶回飯店</p></a>
                         </div>
                     </div>
                 </div>
@@ -208,74 +241,37 @@
                     <div class="bg-primary text-white font-bold px-3 py-1 rounded-full text-sm mr-3">Day 2</div>
                     <h3 class="text-lg font-bold text-gray-800">1/03 (六) 科工館與午茶</h3>
                 </div>
-
                 <div class="relative pl-6">
                     <div class="timeline-line"></div>
-                    
-                    <!-- Science Museum -->
                     <div class="timeline-item mb-6 pl-6 relative">
                         <div class="absolute left-0 top-1.5 w-4 h-4 bg-primary rounded-full border-2 border-white shadow"></div>
                         <div class="bg-white p-4 rounded-xl shadow-md">
                             <div class="flex justify-between items-start mb-2">
-                                <div>
-                                    <span class="text-primary font-bold text-sm">10:30 - 13:30</span>
-                                    <h4 class="font-bold text-lg text-gray-800">國立科學工藝博物館</h4>
-                                </div>
-                                <i class="fas fa-rocket text-gray-300 text-2xl"></i>
+                                <div><span class="text-primary font-bold text-sm">10:30 - 13:30</span><h4 class="font-bold text-lg text-gray-800">國立科學工藝博物館</h4></div><i class="fas fa-rocket text-gray-300 text-2xl"></i>
                             </div>
-                            <a href="https://www.google.com/maps/search/?api=1&query=國立科學工藝博物館" target="_blank" class="block w-full bg-primary/10 hover:bg-primary/20 text-primary text-center py-2 rounded-lg font-bold text-sm transition">
-                                <i class="fas fa-location-arrow mr-1"></i> 導航至科工館
-                            </a>
+                            <a href="https://www.google.com/maps/search/?api=1&query=國立科學工藝博物館" target="_blank" class="block w-full bg-primary/10 hover:bg-primary/20 text-primary text-center py-2 rounded-lg font-bold text-sm transition">導航至科工館</a>
                         </div>
                     </div>
-
-                     <!-- Lunch Options -->
-                     <div class="timeline-item mb-8 pl-6 relative">
+                    <div class="timeline-item mb-8 pl-6 relative">
                         <div class="absolute left-0 top-1.5 w-4 h-4 bg-secondary rounded-full border-2 border-white shadow"></div>
-                        <h4 class="font-bold text-gray-800 mb-2 flex items-center text-sm">
-                            <i class="fas fa-utensils text-secondary mr-2"></i> 午餐選擇
-                        </h4>
-                        <div class="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-                            <a href="https://www.google.com/maps/search/?api=1&query=丹丹漢堡+瀋陽店" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-yellow-500 block">
-                                <h5 class="font-bold text-sm text-gray-800">丹丹漢堡</h5>
-                                <p class="text-xs text-gray-500">南霸天</p>
-                            </a>
-                            <a href="https://www.google.com/maps/search/?api=1&query=醉便宜日式快餐" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-blue-500 block">
-                                <h5 class="font-bold text-sm text-gray-800">醉便宜日式簡餐</h5>
-                                <p class="text-xs text-gray-500">雞腿飯</p>
-                            </a>
+                        <h4 class="font-bold text-gray-800 mb-2 flex items-center text-sm"><i class="fas fa-utensils text-secondary mr-2"></i> 午餐選擇</h4>
+                         <div class="flex gap-4 overflow-x-auto no-scrollbar pb-2">
+                            <a href="https://www.google.com/maps/search/?api=1&query=丹丹漢堡+瀋陽店" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-yellow-500 block"><h5 class="font-bold text-sm text-gray-800">丹丹漢堡</h5><p class="text-xs text-gray-500">南霸天</p></a>
+                            <a href="https://www.google.com/maps/search/?api=1&query=醉便宜日式快餐" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-blue-500 block"><h5 class="font-bold text-sm text-gray-800">醉便宜日式簡餐</h5><p class="text-xs text-gray-500">雞腿飯</p></a>
                         </div>
                     </div>
-
-                    <!-- Afternoon Tea -->
                     <div class="timeline-item mb-6 pl-6 relative">
                         <div class="absolute left-0 top-1.5 w-4 h-4 bg-accent rounded-full border-2 border-white"></div>
                         <div class="bg-white p-3 rounded-xl shadow-sm border-l-2 border-accent">
-                             <div class="flex justify-between items-center">
-                                <div>
-                                    <span class="text-accent font-bold text-sm">14:00 - 17:00</span>
-                                    <h4 class="font-bold text-gray-800">H2O 飯店下午茶</h4>
-                                </div>
-                                <i class="fas fa-coffee text-accent text-xl"></i>
-                            </div>
+                             <div class="flex justify-between items-center"><div><span class="text-accent font-bold text-sm">14:00 - 17:00</span><h4 class="font-bold text-gray-800">H2O 飯店下午茶</h4></div><i class="fas fa-coffee text-accent text-xl"></i></div>
                         </div>
                     </div>
-
-                    <!-- Dinner Options -->
-                    <div class="timeline-item mb-8 pl-6 relative">
+                     <div class="timeline-item mb-8 pl-6 relative">
                         <div class="absolute left-0 top-1.5 w-4 h-4 bg-secondary rounded-full border-2 border-white shadow"></div>
-                        <h4 class="font-bold text-gray-800 mb-2 flex items-center text-sm">
-                            <i class="fas fa-moon text-secondary mr-2"></i> 晚餐選擇
-                        </h4>
+                        <h4 class="font-bold text-gray-800 mb-2 flex items-center text-sm"><i class="fas fa-moon text-secondary mr-2"></i> 晚餐選擇</h4>
                         <div class="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-                            <a href="https://www.google.com/maps/search/?api=1&query=碳佐麻里+高雄美術館旗艦店" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-gray-800 block">
-                                <h5 class="font-bold text-sm text-gray-800">碳佐麻里</h5>
-                                <p class="text-xs text-gray-500">燒肉天花板 (需預約)</p>
-                            </a>
-                            <a href="https://www.google.com/maps/search/?api=1&query=厚得福湯包麵食專賣店" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-orange-500 block">
-                                <h5 class="font-bold text-sm text-gray-800">厚得福湯包</h5>
-                                <p class="text-xs text-gray-500">平價美味</p>
-                            </a>
+                            <a href="https://www.google.com/maps/search/?api=1&query=碳佐麻里+高雄美術館旗艦店" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-gray-800 block"><h5 class="font-bold text-sm text-gray-800">碳佐麻里</h5><p class="text-xs text-gray-500">需預約</p></a>
+                            <a href="https://www.google.com/maps/search/?api=1&query=厚得福湯包麵食專賣店" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-orange-500 block"><h5 class="font-bold text-sm text-gray-800">厚得福湯包</h5><p class="text-xs text-gray-500">平價美味</p></a>
                         </div>
                     </div>
                 </div>
@@ -287,67 +283,34 @@
                     <div class="bg-primary text-white font-bold px-3 py-1 rounded-full text-sm mr-3">Day 3</div>
                     <h3 class="text-lg font-bold text-gray-800">1/04 (日) 悠閒賦歸</h3>
                 </div>
-
                 <div class="relative pl-6">
                     <div class="timeline-line"></div>
-                    
-                    <!-- Park -->
                     <div class="timeline-item mb-6 pl-6 relative">
                         <div class="absolute left-0 top-1.5 w-4 h-4 bg-primary rounded-full border-2 border-white shadow"></div>
                         <div class="bg-white p-3 rounded-xl shadow-sm">
                             <div class="flex justify-between items-center">
-                                <div>
-                                    <span class="text-primary font-bold text-sm">早晨</span>
-                                    <h4 class="font-bold text-gray-800">凹子底森林公園</h4>
-                                </div>
+                                <div><span class="text-primary font-bold text-sm">早晨</span><h4 class="font-bold text-gray-800">凹子底森林公園</h4></div>
                                 <a href="https://www.google.com/maps/search/?api=1&query=凹子底森林公園" target="_blank" class="text-gray-400 hover:text-primary"><i class="fas fa-tree text-xl"></i></a>
                             </div>
                         </div>
                     </div>
-
-                    <!-- Lunch Options -->
                     <div class="timeline-item mb-8 pl-6 relative">
                         <div class="absolute left-0 top-1.5 w-4 h-4 bg-secondary rounded-full border-2 border-white shadow"></div>
-                        <h4 class="font-bold text-gray-800 mb-2 flex items-center text-sm">
-                            <i class="fas fa-utensils text-secondary mr-2"></i> 午餐選擇
-                        </h4>
+                        <h4 class="font-bold text-gray-800 mb-2 flex items-center text-sm"><i class="fas fa-utensils text-secondary mr-2"></i> 午餐選擇</h4>
                         <div class="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-                            <a href="https://www.google.com/maps/search/?api=1&query=蒸鮮腸粉+裕誠店" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-red-500 block">
-                                <h5 class="font-bold text-sm text-gray-800">蒸鮮腸粉</h5>
-                                <p class="text-xs text-gray-500">港式飲茶</p>
-                            </a>
-                            <a href="https://www.google.com/maps/search/?api=1&query=美濃客家菜+華夏店" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-indigo-500 block">
-                                <h5 class="font-bold text-sm text-gray-800">美濃客家菜</h5>
-                                <p class="text-xs text-gray-500">特色合菜</p>
-                            </a>
+                            <a href="https://www.google.com/maps/search/?api=1&query=蒸鮮腸粉+裕誠店" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-red-500 block"><h5 class="font-bold text-sm text-gray-800">蒸鮮腸粉</h5><p class="text-xs text-gray-500">港式飲茶</p></a>
+                            <a href="https://www.google.com/maps/search/?api=1&query=美濃客家菜+華夏店" target="_blank" class="option-card bg-white p-3 rounded-xl shadow border-l-4 border-indigo-500 block"><h5 class="font-bold text-sm text-gray-800">美濃客家菜</h5><p class="text-xs text-gray-500">特色合菜</p></a>
                         </div>
                     </div>
-
-                    <!-- Departure Shuttle -->
                     <div class="timeline-item mb-6 pl-6 relative">
                         <div class="absolute left-0 top-1.5 w-4 h-4 bg-accent rounded-full border-2 border-white shadow animate-pulse"></div>
                         <div class="bg-red-50 p-4 rounded-xl shadow-md border-l-4 border-accent">
-                             <div class="flex justify-between items-start">
-                                <div>
-                                    <span class="text-accent font-bold text-sm">15:00 飯店出發</span>
-                                    <h4 class="font-bold text-gray-800 mt-1">搭乘接駁車/計程車</h4>
-                                    <p class="text-xs text-gray-600 mt-1">前往左營高鐵 (車程約20分)</p>
-                                </div>
-                                <i class="fas fa-taxi text-accent text-2xl"></i>
-                            </div>
+                             <div class="flex justify-between items-start"><div><span class="text-accent font-bold text-sm">15:00 飯店出發</span><h4 class="font-bold text-gray-800 mt-1">搭乘接駁車/計程車</h4></div><i class="fas fa-taxi text-accent text-2xl"></i></div>
                         </div>
                     </div>
-
-                    <!-- HSR -->
                     <div class="timeline-item mb-6 pl-6 relative">
                         <div class="absolute left-0 top-1.5 w-4 h-4 bg-gray-400 rounded-full border-2 border-white"></div>
-                         <div class="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm">
-                            <div>
-                                <span class="text-gray-600 font-bold text-sm">15:55</span>
-                                <h4 class="font-bold text-gray-800">高鐵 140 次</h4>
-                            </div>
-                            <i class="fas fa-home text-gray-300 text-xl"></i>
-                        </div>
+                         <div class="flex justify-between items-center bg-white p-3 rounded-xl shadow-sm"><div><span class="text-gray-600 font-bold text-sm">15:55</span><h4 class="font-bold text-gray-800">高鐵 140 次</h4></div><i class="fas fa-home text-gray-300 text-xl"></i></div>
                     </div>
                 </div>
             </div>
@@ -358,34 +321,16 @@
             <h2 class="text-xl font-bold text-gray-800 mb-4 px-2 border-l-4 border-primary pl-3">必買伴手禮</h2>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div class="bg-white rounded-xl shadow-md overflow-hidden flex">
-                    <div class="w-24 bg-orange-100 flex items-center justify-center flex-shrink-0">
-                        <i class="fas fa-cookie-bite text-2xl text-orange-400"></i>
-                    </div>
-                    <div class="p-3 flex-1">
-                        <h3 class="font-bold text-gray-800">Mars 馬斯斯牛軋糖</h3>
-                        <p class="text-xs text-gray-500 mt-1 line-clamp-2">奶香濃郁不黏牙。</p>
-                        <a href="https://www.google.com/maps/search/?api=1&query=Mars睦工場" target="_blank" class="text-primary text-xs font-bold mt-2 block text-right">導航前往 ></a>
-                    </div>
+                    <div class="w-24 bg-orange-100 flex items-center justify-center flex-shrink-0"><i class="fas fa-cookie-bite text-2xl text-orange-400"></i></div>
+                    <div class="p-3 flex-1"><h3 class="font-bold text-gray-800">Mars 馬斯斯牛軋糖</h3><p class="text-xs text-gray-500 mt-1 line-clamp-2">奶香濃郁。</p><a href="https://www.google.com/maps/search/?api=1&query=Mars睦工場" target="_blank" class="text-primary text-xs font-bold mt-2 block text-right">導航 ></a></div>
                 </div>
                 <div class="bg-white rounded-xl shadow-md overflow-hidden flex">
-                    <div class="w-24 bg-yellow-100 flex items-center justify-center flex-shrink-0">
-                        <i class="fas fa-bread-slice text-2xl text-yellow-600"></i>
-                    </div>
-                    <div class="p-3 flex-1">
-                        <h3 class="font-bold text-gray-800">吳寶春麵包店</h3>
-                        <p class="text-xs text-gray-500 mt-1 line-clamp-2">酒釀桂圓是經典。</p>
-                        <a href="https://www.google.com/maps/search/?api=1&query=吳寶春麥方店+高雄巨蛋" target="_blank" class="text-primary text-xs font-bold mt-2 block text-right">導航前往 ></a>
-                    </div>
+                    <div class="w-24 bg-yellow-100 flex items-center justify-center flex-shrink-0"><i class="fas fa-bread-slice text-2xl text-yellow-600"></i></div>
+                    <div class="p-3 flex-1"><h3 class="font-bold text-gray-800">吳寶春麵包店</h3><p class="text-xs text-gray-500 mt-1 line-clamp-2">酒釀桂圓。</p><a href="https://www.google.com/maps/search/?api=1&query=吳寶春麥方店+高雄巨蛋" target="_blank" class="text-primary text-xs font-bold mt-2 block text-right">導航 ></a></div>
                 </div>
                 <div class="bg-white rounded-xl shadow-md overflow-hidden flex">
-                    <div class="w-24 bg-purple-100 flex items-center justify-center flex-shrink-0">
-                        <i class="fas fa-gift text-2xl text-purple-500"></i>
-                    </div>
-                    <div class="p-3 flex-1">
-                        <h3 class="font-bold text-gray-800">舊振南餅店</h3>
-                        <p class="text-xs text-gray-500 mt-1 line-clamp-2">高鐵左營站內就有。</p>
-                        <a href="https://www.google.com/maps/search/?api=1&query=舊振南+左營高鐵" target="_blank" class="text-primary text-xs font-bold mt-2 block text-right">站內位置 ></a>
-                    </div>
+                    <div class="w-24 bg-purple-100 flex items-center justify-center flex-shrink-0"><i class="fas fa-gift text-2xl text-purple-500"></i></div>
+                    <div class="p-3 flex-1"><h3 class="font-bold text-gray-800">舊振南餅店</h3><p class="text-xs text-gray-500 mt-1 line-clamp-2">左營高鐵內。</p><a href="https://www.google.com/maps/search/?api=1&query=舊振南+左營高鐵" target="_blank" class="text-primary text-xs font-bold mt-2 block text-right">導航 ></a></div>
                 </div>
             </div>
         </div>
@@ -394,26 +339,12 @@
         <div id="tab-snacks" class="tab-content">
             <h2 class="text-xl font-bold text-gray-800 mb-4 px-2 border-l-4 border-secondary pl-3">必吃在地小吃</h2>
             <div class="space-y-4">
-                <div class="bg-white p-3 rounded-xl shadow-sm flex items-center">
-                    <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mr-3 text-xl">🍬</div>
-                    <div class="flex-1">
-                        <h4 class="font-bold text-gray-800 text-sm">老牌白糖粿</h4>
-                        <p class="text-xs text-gray-500">熱熱吃最好吃</p>
-                    </div>
-                    <a href="https://www.google.com/maps/search/?api=1&query=老牌白糖粿" target="_blank" class="bg-gray-100 p-2 rounded-full text-gray-600 hover:text-primary"><i class="fas fa-location-arrow"></i></a>
-                </div>
-                <div class="bg-white p-3 rounded-xl shadow-sm flex items-center">
-                    <div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mr-3 text-xl">🥤</div>
-                    <div class="flex-1">
-                        <h4 class="font-bold text-gray-800 text-sm">樺達奶茶</h4>
-                        <p class="text-xs text-gray-500">美容奶茶 (紅+普+奶)</p>
-                    </div>
-                    <a href="https://www.google.com/maps/search/?api=1&query=樺達奶茶" target="_blank" class="bg-gray-100 p-2 rounded-full text-gray-600 hover:text-primary"><i class="fas fa-location-arrow"></i></a>
-                </div>
+                <div class="bg-white p-3 rounded-xl shadow-sm flex items-center"><div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mr-3 text-xl">🍬</div><div class="flex-1"><h4 class="font-bold text-gray-800 text-sm">老牌白糖粿</h4><p class="text-xs text-gray-500">熱熱吃最好吃</p></div><a href="https://www.google.com/maps/search/?api=1&query=老牌白糖粿" target="_blank" class="bg-gray-100 p-2 rounded-full text-gray-600 hover:text-primary"><i class="fas fa-location-arrow"></i></a></div>
+                <div class="bg-white p-3 rounded-xl shadow-sm flex items-center"><div class="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center mr-3 text-xl">🥤</div><div class="flex-1"><h4 class="font-bold text-gray-800 text-sm">樺達奶茶</h4><p class="text-xs text-gray-500">美容奶茶 (紅+普+奶)</p></div><a href="https://www.google.com/maps/search/?api=1&query=樺達奶茶" target="_blank" class="bg-gray-100 p-2 rounded-full text-gray-600 hover:text-primary"><i class="fas fa-location-arrow"></i></a></div>
             </div>
         </div>
 
-        <!-- TAB 4: ACCOUNTING (NEW) -->
+        <!-- TAB 4: ACCOUNTING (CLOUD) -->
         <div id="tab-accounting" class="tab-content">
             <!-- Summary Card -->
             <div class="balance-card rounded-2xl p-5 text-white shadow-lg mb-6 relative overflow-hidden">
@@ -421,14 +352,8 @@
                     <p class="text-blue-200 text-sm font-medium">總支出 (Total)</p>
                     <h2 class="text-4xl font-bold mt-1" id="total-expense">$0</h2>
                     <div class="mt-4 flex gap-4 text-xs text-blue-100">
-                        <div>
-                            <span class="block opacity-70">分帳人數</span>
-                            <span class="font-bold text-lg">4 位大人</span>
-                        </div>
-                        <div>
-                            <span class="block opacity-70">每人平均</span>
-                            <span class="font-bold text-lg" id="average-expense">$0</span>
-                        </div>
+                        <div><span class="block opacity-70">成員</span><span class="font-bold text-lg">佑彥 禹帆 柚子 珮瑜</span></div>
+                        <div><span class="block opacity-70">每人平均</span><span class="font-bold text-lg" id="average-expense">$0</span></div>
                     </div>
                 </div>
                 <i class="fas fa-coins absolute -right-4 -bottom-4 text-8xl text-white opacity-10"></i>
@@ -436,7 +361,7 @@
 
             <!-- Add Expense Form -->
             <div class="bg-white p-5 rounded-xl shadow-md mb-6">
-                <h3 class="font-bold text-gray-800 mb-3"><i class="fas fa-plus-circle text-secondary mr-2"></i>新增消費</h3>
+                <h3 class="font-bold text-gray-800 mb-3"><i class="fas fa-cloud-upload-alt text-secondary mr-2"></i>新增消費 (自動同步)</h3>
                 <div class="space-y-3">
                     <div>
                         <label class="block text-xs text-gray-500 mb-1">項目名稱</label>
@@ -450,30 +375,26 @@
                         <div class="w-1/2">
                             <label class="block text-xs text-gray-500 mb-1">誰付的？</label>
                             <select id="item-payer" class="w-full bg-gray-50 border border-gray-200 rounded-lg p-2 text-sm focus:outline-none focus:border-primary transition appearance-none">
-                                <option value="爸爸">爸爸</option>
-                                <option value="媽媽">媽媽</option>
-                                <option value="朋友A">朋友A</option>
-                                <option value="朋友B">朋友B</option>
+                                <option value="佑彥">佑彥</option>
+                                <option value="禹帆">禹帆</option>
+                                <option value="柚子">柚子</option>
+                                <option value="珮瑜">珮瑜</option>
                             </select>
                         </div>
                     </div>
-                    <button onclick="addExpense()" class="w-full bg-primary hover:bg-blue-800 text-white font-bold py-3 rounded-lg shadow transition mt-2">
-                        加入紀錄
+                    <button onclick="handleAddExpense()" class="w-full bg-primary hover:bg-blue-800 text-white font-bold py-3 rounded-lg shadow transition mt-2 flex justify-center items-center">
+                        <i class="fas fa-paper-plane mr-2"></i> 上傳紀錄
                     </button>
                 </div>
             </div>
 
             <!-- Settlement Result -->
             <div class="mb-6">
-                <h3 class="font-bold text-gray-800 mb-3 px-1">結算 (多退少補)</h3>
+                <h3 class="font-bold text-gray-800 mb-3 px-1">即時結算 (多退少補)</h3>
                 <div class="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-100">
                     <table class="w-full text-sm text-left">
                         <thead class="bg-gray-50 text-gray-600 font-medium border-b border-gray-200">
-                            <tr>
-                                <th class="p-3">成員</th>
-                                <th class="p-3 text-right">已付</th>
-                                <th class="p-3 text-right">結算</th>
-                            </tr>
+                            <tr><th class="p-3">成員</th><th class="p-3 text-right">已付</th><th class="p-3 text-right">結算</th></tr>
                         </thead>
                         <tbody id="settlement-table" class="divide-y divide-gray-100">
                             <!-- JS Generated -->
@@ -484,36 +405,20 @@
 
             <!-- Expense List -->
             <div class="mb-20">
-                <div class="flex justify-between items-end mb-3 px-1">
-                    <h3 class="font-bold text-gray-800">消費明細</h3>
-                    <button onclick="clearAllData()" class="text-xs text-red-400 hover:text-red-600 underline">清除所有</button>
-                </div>
+                <h3 class="font-bold text-gray-800 mb-3 px-1">消費明細</h3>
                 <div id="expense-list" class="space-y-3">
-                    <!-- JS Generated Items -->
+                    <div class="text-center py-4 text-gray-400 text-sm">正在載入資料...</div>
                 </div>
             </div>
         </div>
-
     </main>
 
     <!-- Bottom Navigation -->
     <nav class="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 pb-safe shadow-[0_-5px_15px_rgba(0,0,0,0.05)] z-50 h-16 flex items-center justify-around">
-        <button onclick="switchTab('tab-itinerary')" class="nav-item active flex flex-col items-center justify-center w-1/4 text-gray-400 hover:text-primary transition h-full" id="nav-itinerary">
-            <i class="fas fa-calendar-check text-lg mb-1"></i>
-            <span class="text-[10px]">行程</span>
-        </button>
-        <button onclick="switchTab('tab-souvenirs')" class="nav-item flex flex-col items-center justify-center w-1/4 text-gray-400 hover:text-primary transition h-full" id="nav-souvenirs">
-            <i class="fas fa-gift text-lg mb-1"></i>
-            <span class="text-[10px]">伴手禮</span>
-        </button>
-        <button onclick="switchTab('tab-snacks')" class="nav-item flex flex-col items-center justify-center w-1/4 text-gray-400 hover:text-primary transition h-full" id="nav-snacks">
-            <i class="fas fa-utensils text-lg mb-1"></i>
-            <span class="text-[10px]">小吃</span>
-        </button>
-        <button onclick="switchTab('tab-accounting')" class="nav-item flex flex-col items-center justify-center w-1/4 text-gray-400 hover:text-primary transition h-full" id="nav-accounting">
-            <i class="fas fa-calculator text-lg mb-1"></i>
-            <span class="text-[10px]">分帳</span>
-        </button>
+        <button onclick="switchTab('tab-itinerary')" class="nav-item active flex flex-col items-center justify-center w-1/4 text-gray-400 hover:text-primary transition h-full" id="nav-itinerary"><i class="fas fa-calendar-check text-lg mb-1"></i><span class="text-[10px]">行程</span></button>
+        <button onclick="switchTab('tab-souvenirs')" class="nav-item flex flex-col items-center justify-center w-1/4 text-gray-400 hover:text-primary transition h-full" id="nav-souvenirs"><i class="fas fa-gift text-lg mb-1"></i><span class="text-[10px]">伴手禮</span></button>
+        <button onclick="switchTab('tab-snacks')" class="nav-item flex flex-col items-center justify-center w-1/4 text-gray-400 hover:text-primary transition h-full" id="nav-snacks"><i class="fas fa-utensils text-lg mb-1"></i><span class="text-[10px]">小吃</span></button>
+        <button onclick="switchTab('tab-accounting')" class="nav-item flex flex-col items-center justify-center w-1/4 text-gray-400 hover:text-primary transition h-full" id="nav-accounting"><i class="fas fa-calculator text-lg mb-1"></i><span class="text-[10px]">分帳</span></button>
     </nav>
 
     <script>
@@ -523,94 +428,89 @@
                 tab.classList.remove('active');
             });
             document.getElementById(tabId).classList.add('active');
-
             document.querySelectorAll('.nav-item').forEach(btn => {
                 btn.classList.remove('active');
                 btn.style.color = '#9ca3af';
             });
-            
             const navId = tabId.replace('tab-', 'nav-');
             const activeBtn = document.getElementById(navId);
             activeBtn.classList.add('active');
             activeBtn.style.color = '#0f4c81';
-            
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
-        // --- Accounting Logic ---
-        // Load data from localStorage
-        let expenses = JSON.parse(localStorage.getItem('kaohsiung_trip_expenses')) || [];
-        const splitCount = 4; // 4 Adults
-
+        // --- Logic (Calls global vars from module) ---
         function formatMoney(amount) {
             return '$' + amount.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
         }
 
-        function saveExpenses() {
-            localStorage.setItem('kaohsiung_trip_expenses', JSON.stringify(expenses));
-            renderExpenses();
-        }
-
-        function addExpense() {
+        async function handleAddExpense() {
             const item = document.getElementById('item-name').value;
             const amount = parseInt(document.getElementById('item-amount').value);
             const payer = document.getElementById('item-payer').value;
+
+            if (!window.currentAuthUser) {
+                alert("尚未連線到雲端資料庫，請稍後再試。");
+                return;
+            }
 
             if (!item || !amount || isNaN(amount)) {
                 alert("請輸入完整的項目與金額喔！");
                 return;
             }
 
-            expenses.unshift({
-                id: Date.now(),
-                item: item,
-                amount: amount,
-                payer: payer,
-                date: new Date().toLocaleDateString()
-            });
+            try {
+                // Using global vars exposed from module
+                await window.addDoc(window.collection(window.db, 'artifacts', window.appId, 'public', 'data', 'expenses'), {
+                    item: item,
+                    amount: amount,
+                    payer: payer,
+                    date: new Date().toLocaleDateString(),
+                    timestamp: Date.now()
+                });
 
-            // Clear inputs
-            document.getElementById('item-name').value = '';
-            document.getElementById('item-amount').value = '';
-            
-            saveExpenses();
-        }
-
-        function deleteExpense(id) {
-            if(confirm('確定要刪除這筆紀錄嗎？')) {
-                expenses = expenses.filter(e => e.id !== id);
-                saveExpenses();
+                // Clear inputs
+                document.getElementById('item-name').value = '';
+                document.getElementById('item-amount').value = '';
+                // alert('新增成功！'); // Optional feedback
+            } catch (e) {
+                console.error("Add error", e);
+                alert("新增失敗，請檢查網路連線");
             }
         }
 
-        function clearAllData() {
-            if(confirm('確定要清空所有記帳資料嗎？無法復原喔！')) {
-                expenses = [];
-                saveExpenses();
+        async function handleDeleteExpense(id) {
+            if(confirm('確定要刪除這筆紀錄嗎？所有人的資料都會同步刪除喔！')) {
+                try {
+                     await window.deleteDoc(window.doc(window.db, 'artifacts', window.appId, 'public', 'data', 'expenses', id));
+                } catch(e) {
+                    console.error("Delete error", e);
+                    alert("刪除失敗");
+                }
             }
         }
 
-        function renderExpenses() {
+        // Render Function (Called by snapshot listener)
+        window.renderExpenses = function(expenses) {
             const listEl = document.getElementById('expense-list');
             const totalEl = document.getElementById('total-expense');
             const avgEl = document.getElementById('average-expense');
             const settlementEl = document.getElementById('settlement-table');
             
-            // 1. Render List
             listEl.innerHTML = '';
             let total = 0;
-            const paidByPerson = { "爸爸": 0, "媽媽": 0, "朋友A": 0, "朋友B": 0 };
+            const paidByPerson = { "佑彥": 0, "禹帆": 0, "柚子": 0, "珮瑜": 0 };
 
             expenses.forEach(exp => {
                 total += exp.amount;
                 if (paidByPerson[exp.payer] !== undefined) {
                     paidByPerson[exp.payer] += exp.amount;
                 } else {
-                    paidByPerson[exp.payer] = exp.amount; // Handle custom names if any
+                    paidByPerson[exp.payer] = exp.amount;
                 }
 
                 const el = document.createElement('div');
-                el.className = 'bg-white p-3 rounded-lg shadow-sm border border-gray-100 flex justify-between items-center';
+                el.className = 'bg-white p-3 rounded-lg shadow-sm border border-gray-100 flex justify-between items-center animate-[fadeIn_0.5s]';
                 el.innerHTML = `
                     <div>
                         <div class="font-bold text-gray-800">${exp.item}</div>
@@ -621,20 +521,20 @@
                     </div>
                     <div class="flex items-center gap-3">
                         <span class="font-bold text-gray-800">${formatMoney(exp.amount)}</span>
-                        <button onclick="deleteExpense(${exp.id})" class="text-gray-300 hover:text-red-500"><i class="fas fa-trash-alt"></i></button>
+                        <button onclick="handleDeleteExpense('${exp.id}')" class="text-gray-300 hover:text-red-500"><i class="fas fa-trash-alt"></i></button>
                     </div>
                 `;
                 listEl.appendChild(el);
             });
 
-            // 2. Render Summary
+            // Summary
             totalEl.innerText = formatMoney(total);
-            const average = total > 0 ? Math.round(total / splitCount) : 0;
+            const average = total > 0 ? Math.round(total / 4) : 0;
             avgEl.innerText = formatMoney(average);
 
-            // 3. Render Settlement
+            // Settlement
             settlementEl.innerHTML = '';
-            const members = ["爸爸", "媽媽", "朋友A", "朋友B"];
+            const members = ["佑彥", "禹帆", "柚子", "珮瑜"];
             
             members.forEach(member => {
                 const paid = paidByPerson[member] || 0;
@@ -642,9 +542,9 @@
                 let balanceHtml = '';
                 
                 if (balance > 0) {
-                    balanceHtml = `<span class="text-green-600 font-bold">+收 ${balance}</span>`;
+                    balanceHtml = `<span class="text-green-600 font-bold">+收 ${formatMoney(balance)}</span>`;
                 } else if (balance < 0) {
-                    balanceHtml = `<span class="text-red-500 font-bold">付 ${Math.abs(balance)}</span>`;
+                    balanceHtml = `<span class="text-red-500 font-bold">付 ${formatMoney(Math.abs(balance))}</span>`;
                 } else {
                     balanceHtml = `<span class="text-gray-400">-</span>`;
                 }
@@ -662,9 +562,6 @@
                 listEl.innerHTML = '<div class="text-center text-gray-400 py-4 text-sm">目前還沒有消費紀錄喔～</div>';
             }
         }
-
-        // Initialize
-        renderExpenses();
     </script>
 </body>
 </html>
